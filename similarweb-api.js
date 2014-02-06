@@ -1,9 +1,13 @@
 var SW = {
     baseUrl : 'http://api.similarweb.com/site/',
+    cacheDelay : 100,
     nonCompanyEmails : ['gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com', 'googlemail.com'],
     notEnoughDataText : '--',
     subdomainText : 'Subdomain',
     unknownSiteText : 'n/a',
+    text : {
+        noApiKey : 'Enter a valid API key in the settings sheet'
+    },
 
     fetchOptions : {
         "muteHttpExceptions" : true // needed so we can get status code of response
@@ -54,19 +58,94 @@ var SW = {
         }
 
         return uniques.sort(compareFrequency);
-    }
+    },
 
+    parseSiteFromEmail : function(email){
+        var site = email.split('@')[1];
+
+        // check if it is a non-regular url
+        var urlSections = site.split('.');
+        if ( urlSections.length > 2 && urlSections[1] !== 'com' && urlSections[1] !== 'co' ){
+            return this.subdomainText;
+        }
+
+        // check if it's a non company email (like gmail)
+        if (this.nonCompanyEmails.indexOf(site) > -1){
+            return this.unknownSiteText;
+        } else {
+            return site;
+        }
+    },
+
+    checkAdultContent : function(categoryResp){
+        // check if we got a valid resp or if it returned an error
+        if (typeof categoryResp !== 'object') return categoryResp;
+        if (categoryResp.Category == 'Adult') {
+            return 'yes';
+        } else {
+            return 'no';
+        }
+    }
 };
 
+function getCompanyCategoryRankTraffic(email, userKey){
+    if (!email) return;
+    if (!userKey) return SW.text.noApiKey;
+
+    var site = SW.parseSiteFromEmail(email);
+
+    // if no site, stop and don't make api calls
+    if (!site) return;
+
+    // if we have email, but company is unknown or it is a subdomain
+    if (site == SW.unknownSiteText) return [SW.unknownSiteText, SW.notEnoughDataText, SW.notEnoughDataText, SW.notEnoughDataText];
+    if (site == SW.subdomainText) return [SW.subdomainText, SW.notEnoughDataText, SW.notEnoughDataText, SW.notEnoughDataText];
+
+    // if we already have this site's data in the cache, don't do another api request
+    var cache = SW.getCache(),
+        cacheVal = JSON.parse( cache.get(site) ); // returns string, need to convert to array
+    if (cacheVal != null) return cacheVal;
+
+    /*// if there is a site and we know it try making first api call
+    var category = SW.getCategory(site, userKey);
+    // if no data found, don't make other api calls
+    if (!category) return [site, SW.notEnoughDataText, SW.notEnoughDataText, SW.notEnoughDataText];*/
+
+    /*// if category returned data, go ahead and make other api calls
+    var globalRank = SW.getGlobalRank(site, userKey),
+        estimatedTraffic = SW.getEstimatedTraffic(site, userKey);*/
+
+    // if there is a site and we know it try making first api call
+    var categoryData = SW.fetchData(site, '/v2/CategoryRank', userKey);
+    if (!categoryData) return [site, SW.notEnoughDataText, SW.notEnoughDataText, SW.notEnoughDataText];
+    var category = categoryData.Category.replace(/_/g, " ");
+
+    // if category returned data, go ahead and make other api calls
+    Utilities.sleep(1000);
+    var globalRankData = SW.fetchData(site, '/v1/traffic', userKey),
+        globalRank = globalRankData.GlobalRank;
+    if (globalRank === 0) globalRank = 'Redirects to another site';
+
+    Utilities.sleep(2000);
+    var estimatedTrafficData = SW.fetchData(site, '/v1/EstimatedTraffic', userKey),
+        estimatedTraffic = estimatedTrafficData.EstimatedVisitors;
+    if (estimatedTraffic === 0) estimatedTraffic = 'Redirects to another site';
+
+    var data = [site, category, globalRank, estimatedTraffic];
+
+    // store our cached result (as JSON) and return data array
+    cache.put(site, JSON.stringify(data), SW.cacheDelay); // cache expires after 1000 seconds
+    return data;
+}
 
 function getSimilarSitesAndFrequentKeywords(site, userKey) {
     // check if we have a value in the site cell and a userkey
     if (!site) return;
-    if (!userKey) return 'Enter a valid API key in the settings sheet';
+    if (!userKey) return SW.text.noApiKey;
 
     // if we already have this site's data in the cache, don't do another api request
     var cache = SW.getCache(),
-            cacheVal = JSON.parse( cache.get(site) ); // returns string, need to convert to array
+        cacheVal = JSON.parse( cache.get(site) ); // returns string, need to convert to array
     if (cacheVal != null) return cacheVal;
 
     // fetch APIs needed
@@ -95,7 +174,45 @@ function getSimilarSitesAndFrequentKeywords(site, userKey) {
     var data = [topTenSites, topTenWords];
 
     // store our cached result (as JSON) and return data
-    cache.put(site, JSON.stringify(data), 100); // cache expires after 100 seconds
+    cache.put(site, JSON.stringify(data), SW.cacheDelay); // cache expires after 100 seconds
+    return data;
+}
+
+function estimateTraffic(site, userKey) {
+    // check if we have a value in the site cell and a userkey
+    if (!site) return;
+    if (!userKey) return SW.text.noApiKey;
+
+    // if we already have this site's data in the cache, don't do another api request
+    var cache = SW.getCache(),
+        cacheVal = JSON.parse( cache.get(site) ); // returns string, need to convert to array
+    if (cacheVal != null) return cacheVal;
+
+    // fetch APIs needed and put returned data in an array
+    var estTraffic = SW.fetchData(site, '/v1/EstimatedTraffic', userKey);
+
+    // store our cached result (as JSON) and return data
+    cache.put(site, JSON.stringify(estTraffic.EstimatedVisitors), SW.cacheDelay); // cache expires after 1 seconds
+    return estTraffic.EstimatedVisitors;
+}
+
+function detectAdultContent(site, userKey){
+    // check if we have a value in the site cell and a userkey
+    if (!site) return;
+    if (!userKey) return SW.text.noApiKey;
+
+    // if we already have this site's data in the cache, don't do another api request
+    var cache = SW.getCache(),
+        cacheVal = JSON.parse( cache.get(site) ); // returns string, need to convert to array
+    if (cacheVal != null) return cacheVal;
+
+    // fetch APIs needed and put returned data in an array
+    var categoryRank = SW.fetchData(site, 'v2/CategoryRank', userKey);
+
+    var data =  SW.checkAdultContent(categoryRank);
+
+    // store our cached result (as JSON) and return data array
+    cache.put(site, JSON.stringify(data), SW.cacheDelay); // cache expires after 1000 seconds
     return data;
 }
 
