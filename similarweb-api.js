@@ -1,6 +1,6 @@
 var SW = {
     baseUrl : 'http://api.similarweb.com/site/',
-    cacheDelay : 100,
+    cacheDelay : 500,
     nonCompanyEmails : ['gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com', 'googlemail.com'],
     notEnoughDataText : '--',
     subdomainText : 'Subdomain',
@@ -105,15 +105,6 @@ function getCompanyCategoryRankTraffic(email, userKey){
     var cache = SW.getCache(),
         cacheVal = JSON.parse( cache.get(site) ); // returns string, need to convert to array
     if (cacheVal != null) return cacheVal;
-
-    /*// if there is a site and we know it try making first api call
-    var category = SW.getCategory(site, userKey);
-    // if no data found, don't make other api calls
-    if (!category) return [site, SW.notEnoughDataText, SW.notEnoughDataText, SW.notEnoughDataText];*/
-
-    /*// if category returned data, go ahead and make other api calls
-    var globalRank = SW.getGlobalRank(site, userKey),
-        estimatedTraffic = SW.getEstimatedTraffic(site, userKey);*/
 
     // if there is a site and we know it try making first api call
     var categoryData = SW.fetchData(site, '/v2/CategoryRank', userKey);
